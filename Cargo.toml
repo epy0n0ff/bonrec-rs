@@ -1,0 +1,64 @@
+[package]
+name = "bonrec-rs"
+version = "0.1.0"
+edition = "2021"
+description = "BonDriver channel scanner for Japanese digital TV tuners"
+license = "MIT"
+repository = "https://github.com/epy0n0ff/bonrec-rs"
+keywords = ["bondriver", "tv", "tuner", "isdb", "channel-scan"]
+categories = ["command-line-utilities", "multimedia"]
+
+[dependencies]
+# DLL dynamic loading
+libloading = "0.8"
+
+# SQLite database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Progress bar
+indicatif = "0.17"
+
+# Ctrl+C handling
+ctrlc = "3.4"
+
+# Error handling
+thiserror = "1.0"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# MPEG-2 TS parsing
+mpeg2ts-reader = "0.18"
+
+# Character encoding (for ARIB)
+encoding_rs = "0.8"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(windows)'.dependencies]
+# Windows-specific dependencies if needed
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[[bin]]
+name = "bonrec-rs"
+path = "src/main.rs"
+
+[lib]
+name = "bonrec"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

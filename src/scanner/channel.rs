@@ -114,24 +114,26 @@ impl ChannelScanner {
         // Wait a bit for tuning to stabilize
         std::thread::sleep(Duration::from_millis(500));
 
-        // Check signal level
+        // Check signal level (some BonDrivers may return 0 even with signal)
         let signal_level = tuner.get_signal_level();
-        if signal_level <= 0.0 {
-            log::debug!(
-                "No signal on space={}, channel={}: {:.2}dB",
-                space,
-                channel,
-                signal_level
-            );
-            return Ok(None);
-        }
-
         log::debug!(
             "Scanning space={}, channel={}, signal={:.2}dB",
             space,
             channel,
             signal_level
         );
+
+        // Only skip if signal level is clearly indicating no signal
+        // Some BonDrivers return 0.0 or negative values even with valid signal
+        if signal_level < -100.0 {
+            log::debug!(
+                "Very weak signal on space={}, channel={}: {:.2}dB, skipping",
+                space,
+                channel,
+                signal_level
+            );
+            return Ok(None);
+        }
 
         // Collect SI information with timeout
         let mut parser = SiParser::new();
@@ -143,38 +145,81 @@ impl ChannelScanner {
                 return Err(BonrecError::Interrupted);
             }
 
-            // Read TS stream
-            let wait_result = tuner.wait_ts_stream(1000); // 1 second wait
+            // Wait for TS stream data
+            let wait_result = tuner.wait_ts_stream(500); // 500ms wait
             if wait_result == 0 {
+                log::trace!("No TS data available, retrying...");
                 continue;
             }
 
-            // Get TS data
-            let ts_data = tuner.read_ts_stream(1000)?;
-            if ts_data.is_empty() {
+            // Get TS data directly without double wait
+            let ready_count = tuner.get_ready_count();
+            if ready_count == 0 {
                 continue;
             }
+
+            // Read available data
+            let mut buffer = vec![0u8; 188 * 256]; // ~48KB buffer
+            let mut all_data = Vec::new();
+
+            loop {
+                match tuner.get_ts_stream(&mut buffer) {
+                    Ok((bytes_read, remain)) => {
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        all_data.extend_from_slice(&buffer[..bytes_read]);
+                        if remain == 0 {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        log::trace!("Error reading TS stream: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            if all_data.is_empty() {
+                continue;
+            }
+
+            log::trace!("Read {} bytes of TS data", all_data.len());
 
             // Parse SI information
-            parser.parse(&ts_data)?;
+            parser.parse(&all_data)?;
 
             // Check if we have enough information
             if parser.has_basic_info() && parser.has_service_names() {
+                log::debug!(
+                    "SI info complete for space={}, channel={}",
+                    space,
+                    channel
+                );
                 break;
             }
         }
 
         if !parser.has_basic_info() {
             log::debug!(
-                "No SI info found on space={}, channel={}",
+                "No PAT found on space={}, channel={} (timeout after {}s)",
                 space,
-                channel
+                channel,
+                self.config.si_timeout_secs
             );
             return Ok(None);
         }
 
+        if !parser.has_service_names() {
+            log::debug!(
+                "PAT found but no SDT on space={}, channel={}, continuing with partial info",
+                space,
+                channel
+            );
+        }
+
         let services = parser.get_services();
-        log::debug!(
+        log::info!(
             "Found {} services on space={}, channel={}",
             services.len(),
             space,

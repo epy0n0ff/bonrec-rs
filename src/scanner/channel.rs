@@ -140,20 +140,33 @@ impl ChannelScanner {
         let start_time = Instant::now();
         let timeout = Duration::from_secs(self.config.si_timeout_secs);
 
+        let mut total_bytes_read = 0u64;
+        let mut wait_attempts = 0u32;
+
         while start_time.elapsed() < timeout {
             if self.is_interrupted() {
                 return Err(BonrecError::Interrupted);
             }
 
+            wait_attempts += 1;
+
             // Wait for TS stream data
             let wait_result = tuner.wait_ts_stream(500); // 500ms wait
+            log::debug!(
+                "wait_ts_stream returned {} (attempt {})",
+                wait_result,
+                wait_attempts
+            );
+
             if wait_result == 0 {
-                log::trace!("No TS data available, retrying...");
+                log::debug!("No TS data available, retrying...");
                 continue;
             }
 
             // Get TS data directly without double wait
             let ready_count = tuner.get_ready_count();
+            log::debug!("get_ready_count returned {}", ready_count);
+
             if ready_count == 0 {
                 continue;
             }
@@ -181,10 +194,16 @@ impl ChannelScanner {
             }
 
             if all_data.is_empty() {
+                log::debug!("get_ts_stream returned empty data");
                 continue;
             }
 
-            log::debug!("Read {} bytes of TS data", all_data.len());
+            total_bytes_read += all_data.len() as u64;
+            log::debug!(
+                "Read {} bytes of TS data (total: {} bytes)",
+                all_data.len(),
+                total_bytes_read
+            );
 
             // Parse SI information
             parser.parse(&all_data)?;
@@ -200,12 +219,21 @@ impl ChannelScanner {
             }
         }
 
+        log::debug!(
+            "Scan complete: {} attempts, {} bytes read, PAT={}, SDT={}",
+            wait_attempts,
+            total_bytes_read,
+            parser.has_basic_info(),
+            parser.has_service_names()
+        );
+
         if !parser.has_basic_info() {
             log::debug!(
-                "No PAT found on space={}, channel={} (timeout after {}s)",
+                "No PAT found on space={}, channel={} (timeout after {}s, {} bytes read)",
                 space,
                 channel,
-                self.config.si_timeout_secs
+                self.config.si_timeout_secs,
+                total_bytes_read
             );
             return Ok(None);
         }

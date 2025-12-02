@@ -9,6 +9,7 @@ BonDriverを使用してチャンネルスキャンを行い、チャンネル�
 - 特定の放送波（地上波、BS、CS等）のみをスキャン可能
 - JSON/CSV形式で出力
 - スキャン結果をSQLiteデータベースに保存
+- 保存済みスキャン結果のエクスポート
 - Ctrl+Cで安全に中断（部分的な結果を保存）
 - プログレスバー表示
 
@@ -67,6 +68,22 @@ bonrec-rs scan -s "地上D" BonDriver_PT3-T.dll
 bonrec-rs scan -s "BS" -s "CS110" BonDriver_PT3-S.dll
 ```
 
+### データベースからエクスポート
+
+```powershell
+# 最新のスキャン結果をJSON出力
+bonrec-rs export --latest
+
+# 最新のスキャン結果をファイルに出力
+bonrec-rs export --latest -o channels.json
+
+# 特定のセッションIDを指定して出力
+bonrec-rs export --session 1 -o channels.json
+
+# CSV形式で出力
+bonrec-rs export --latest -f csv -o channels.csv
+```
+
 ### その他のオプション
 
 ```
@@ -74,7 +91,8 @@ USAGE:
     bonrec-rs [OPTIONS] <COMMAND>
 
 COMMANDS:
-    scan    Scan channels using BonDriver
+    scan      Scan channels using BonDriver
+    export    Export scan results from database
 
 OPTIONS:
     -v, --verbose    Enable verbose logging
@@ -88,6 +106,13 @@ SCAN OPTIONS:
     -s, --space <NAME>       Tuning spaces to scan (can specify multiple)
         --db <PATH>          SQLite database path (default: bonrec.db)
         --no-progress        Disable progress bar
+
+EXPORT OPTIONS:
+        --session <ID>       Scan session ID to export
+        --latest             Export the latest scan session
+    -o, --output <FILE>      Output file path (default: stdout)
+    -f, --format <FORMAT>    Output format: json, csv (default: json)
+        --db <PATH>          SQLite database path (default: bonrec.db)
 ```
 
 ## 出力形式

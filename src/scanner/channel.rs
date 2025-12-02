@@ -141,38 +141,21 @@ impl ChannelScanner {
         let timeout = Duration::from_secs(self.config.si_timeout_secs);
 
         let mut total_bytes_read = 0u64;
-        let mut wait_attempts = 0u32;
+        let mut read_attempts = 0u32;
+        let mut buffer = vec![0u8; 188 * 256]; // ~48KB buffer
 
         while start_time.elapsed() < timeout {
             if self.is_interrupted() {
                 return Err(BonrecError::Interrupted);
             }
 
-            wait_attempts += 1;
+            read_attempts += 1;
 
-            // Wait for TS stream data
-            let wait_result = tuner.wait_ts_stream(500); // 500ms wait
-            log::debug!(
-                "wait_ts_stream returned {} (attempt {})",
-                wait_result,
-                wait_attempts
-            );
+            // Call WaitTsStream to trigger internal data preparation (even if return value is 0)
+            let wait_result = tuner.wait_ts_stream(100);
+            log::trace!("WaitTsStream returned: {}", wait_result);
 
-            if wait_result == 0 {
-                log::debug!("No TS data available, retrying...");
-                continue;
-            }
-
-            // Get TS data directly without double wait
-            let ready_count = tuner.get_ready_count();
-            log::debug!("get_ready_count returned {}", ready_count);
-
-            if ready_count == 0 {
-                continue;
-            }
-
-            // Read available data
-            let mut buffer = vec![0u8; 188 * 256]; // ~48KB buffer
+            // Try to read TS data
             let mut all_data = Vec::new();
 
             loop {
@@ -182,27 +165,30 @@ impl ChannelScanner {
                             break;
                         }
                         all_data.extend_from_slice(&buffer[..bytes_read]);
+                        log::trace!("Read {} bytes, {} remaining", bytes_read, remain);
                         if remain == 0 {
                             break;
                         }
                     }
-                    Err(e) => {
-                        log::trace!("Error reading TS stream: {}", e);
+                    Err(_) => {
+                        // No data available or error, wait a bit and retry
                         break;
                     }
                 }
             }
 
             if all_data.is_empty() {
-                log::debug!("get_ts_stream returned empty data");
+                // No data available, wait a bit before retrying
+                std::thread::sleep(Duration::from_millis(100));
                 continue;
             }
 
             total_bytes_read += all_data.len() as u64;
             log::debug!(
-                "Read {} bytes of TS data (total: {} bytes)",
+                "Read {} bytes of TS data (total: {} bytes, attempt {})",
                 all_data.len(),
-                total_bytes_read
+                total_bytes_read,
+                read_attempts
             );
 
             // Parse SI information
@@ -217,11 +203,14 @@ impl ChannelScanner {
                 );
                 break;
             }
+
+            // Small delay between read attempts
+            std::thread::sleep(Duration::from_millis(50));
         }
 
         log::debug!(
             "Scan complete: {} attempts, {} bytes read, PAT={}, SDT={}",
-            wait_attempts,
+            read_attempts,
             total_bytes_read,
             parser.has_basic_info(),
             parser.has_service_names()

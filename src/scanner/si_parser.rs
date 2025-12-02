@@ -76,18 +76,91 @@ impl SiParser {
         SiParser::default()
     }
 
+    /// Find TS sync pattern and determine packet size
+    /// Returns (start_offset, packet_size)
+    fn find_sync_pattern(&self, data: &[u8]) -> (Option<usize>, Option<usize>) {
+        // Common packet sizes: 188 (standard), 192 (with timestamp), 204 (with RS coding)
+        let packet_sizes = [188, 192, 204];
+
+        // Search in first 1024 bytes for sync pattern
+        let search_len = std::cmp::min(1024, data.len());
+
+        for i in 0..search_len {
+            if data[i] == TS_SYNC_BYTE {
+                // Found potential sync byte, verify with next packets
+                for &pkt_size in &packet_sizes {
+                    let mut valid = true;
+                    // Check next 3 sync bytes to confirm pattern
+                    for j in 1..=3 {
+                        let next_pos = i + j * pkt_size;
+                        if next_pos >= data.len() {
+                            // Not enough data to verify, assume this size might work
+                            if j >= 2 {
+                                // At least 2 sync bytes found
+                                return (Some(i), Some(pkt_size));
+                            }
+                            valid = false;
+                            break;
+                        }
+                        if data[next_pos] != TS_SYNC_BYTE {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if valid {
+                        return (Some(i), Some(pkt_size));
+                    }
+                }
+            }
+        }
+
+        (None, None)
+    }
+
     /// Parse TS data and extract SI information
     pub fn parse(&mut self, ts_data: &[u8]) -> Result<()> {
+        // Debug: Log first 32 bytes of data to diagnose format issues
+        if ts_data.len() >= 32 {
+            log::debug!(
+                "First 32 bytes: {:02X?}",
+                &ts_data[..32]
+            );
+        }
+
+        // Try to find sync byte and determine packet size
+        let (start_offset, packet_size) = self.find_sync_pattern(ts_data);
+
+        if start_offset.is_none() {
+            log::debug!("No TS sync pattern found in {} bytes of data", ts_data.len());
+            return Ok(());
+        }
+
+        let start_offset = start_offset.unwrap();
+        let packet_size = packet_size.unwrap_or(TS_PACKET_SIZE);
+
+        log::debug!(
+            "Found TS sync at offset {}, packet size {} bytes",
+            start_offset,
+            packet_size
+        );
+
         // Process each TS packet
-        let mut offset = 0;
+        let mut offset = start_offset;
         let mut sync_errors = 0;
         let mut packets_processed = 0;
         let mut pat_packets = 0;
         let mut sdt_packets = 0;
         let mut nit_packets = 0;
 
-        while offset + TS_PACKET_SIZE <= ts_data.len() {
-            let packet = &ts_data[offset..offset + TS_PACKET_SIZE];
+        // Use standard 188 byte packet for actual TS data parsing
+        // (packet_size includes any prefix bytes like timestamp)
+        let ts_packet_len = TS_PACKET_SIZE;
+        let prefix_len = packet_size - ts_packet_len;
+
+        while offset + packet_size <= ts_data.len() {
+            // Skip any prefix bytes (timestamp, etc.) to get to actual TS packet
+            let packet_start = offset + prefix_len;
+            let packet = &ts_data[packet_start..packet_start + ts_packet_len];
 
             if packet[0] != TS_SYNC_BYTE {
                 // Try to find sync byte
@@ -115,19 +188,19 @@ impl SiParser {
                 payload_offset = 5 + adaptation_length;
             }
 
-            if payload_offset >= TS_PACKET_SIZE {
-                offset += TS_PACKET_SIZE;
+            if payload_offset >= ts_packet_len {
+                offset += packet_size;
                 continue;
             }
 
             // Only process packets with payload
             if adaptation_field_control == 0 || adaptation_field_control == 2 {
-                offset += TS_PACKET_SIZE;
+                offset += packet_size;
                 continue;
             }
 
             // Process payload based on PID
-            if payload_unit_start && payload_offset < TS_PACKET_SIZE {
+            if payload_unit_start && payload_offset < ts_packet_len {
                 let payload = &packet[payload_offset..];
 
                 match pid {
@@ -151,10 +224,10 @@ impl SiParser {
                 }
             }
 
-            offset += TS_PACKET_SIZE;
+            offset += packet_size;
         }
 
-        log::trace!(
+        log::debug!(
             "Parsed {} packets (sync_errors={}, PAT={}, SDT={}, NIT={})",
             packets_processed,
             sync_errors,

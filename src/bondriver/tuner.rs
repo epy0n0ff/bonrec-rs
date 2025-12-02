@@ -214,19 +214,80 @@ impl Tuner {
     /// Returns (bytes_read, bytes_remaining)
     pub fn get_ts_stream(&self, buffer: &mut [u8]) -> Result<(usize, usize)> {
         let driver = self.loader.driver_ptr();
-        let mut size = buffer.len() as u32;
+        let mut size: u32 = buffer.len() as u32;
         let mut remain: u32 = 0;
 
-        let result = unsafe {
+        // Try GetTsStreamCopy first (more commonly implemented correctly)
+        let result_copy = unsafe {
             let vtable = &*(*driver).vtable;
             (vtable.get_ts_stream_copy)(driver, buffer.as_mut_ptr(), &mut size, &mut remain)
         };
 
-        if result == FALSE {
-            return Err(BonrecError::operation_error("Failed to get TS stream"));
+        log::trace!(
+            "GetTsStreamCopy: result={}, size={}, remain={}",
+            result_copy,
+            size,
+            remain
+        );
+
+        if result_copy == TRUE && size > 0 {
+            // Check if data looks like TS (first byte should be 0x47)
+            if size >= 16 {
+                log::trace!(
+                    "GetTsStreamCopy data[0..16]: {:02X?}",
+                    &buffer[..16]
+                );
+                // Check for TS sync byte
+                if buffer[0] == 0x47 {
+                    log::trace!("Valid TS data from GetTsStreamCopy");
+                    return Ok((size as usize, remain as usize));
+                }
+                log::trace!("GetTsStreamCopy returned non-TS data, trying GetTsStreamPtr");
+            } else {
+                return Ok((size as usize, remain as usize));
+            }
         }
 
-        Ok((size as usize, remain as usize))
+        // Fallback to GetTsStreamPtr if GetTsStreamCopy fails or returns non-TS data
+        let mut data_ptr: *mut u8 = std::ptr::null_mut();
+        size = 0;
+        remain = 0;
+
+        let result_ptr = unsafe {
+            let vtable = &*(*driver).vtable;
+            (vtable.get_ts_stream_ptr)(driver, &mut data_ptr, &mut size, &mut remain)
+        };
+
+        log::trace!(
+            "GetTsStreamPtr: result={}, ptr_null={}, size={}, remain={}",
+            result_ptr,
+            data_ptr.is_null(),
+            size,
+            remain
+        );
+
+        if result_ptr == TRUE && !data_ptr.is_null() && size > 0 {
+            let copy_size = std::cmp::min(size as usize, buffer.len());
+            unsafe {
+                std::ptr::copy_nonoverlapping(data_ptr, buffer.as_mut_ptr(), copy_size);
+            }
+            // Log first 16 bytes for debugging
+            if copy_size >= 16 {
+                log::trace!(
+                    "GetTsStreamPtr data[0..16]: {:02X?}",
+                    &buffer[..16]
+                );
+            }
+            return Ok((copy_size, remain as usize));
+        }
+
+        // Neither method succeeded
+        if result_copy == TRUE && size > 0 {
+            // Return copy result even if it doesn't look like TS
+            return Ok((size as usize, remain as usize));
+        }
+
+        Err(BonrecError::operation_error("Failed to get TS stream"))
     }
 
     /// Purge TS stream buffer

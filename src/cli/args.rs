@@ -15,9 +15,13 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Enable verbose logging
+    /// Enable verbose logging (debug level)
     #[arg(short, long, global = true)]
     pub verbose: bool,
+
+    /// Enable trace logging (most detailed, for debugging TS stream issues)
+    #[arg(long, global = true)]
+    pub trace: bool,
 }
 
 /// Available subcommands

@@ -37,7 +37,21 @@ impl Database {
 
     /// Initialize database schema
     fn initialize(&self) -> Result<()> {
-        // Check if schema exists
+        // Check if schema_version table exists
+        let table_exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'",
+                [],
+                |row| row.get::<_, i32>(0).map(|count| count > 0),
+            )?;
+
+        if !table_exists {
+            // New database, create schema
+            return self.create_schema();
+        }
+
+        // Check schema version
         let version: Option<i32> = self
             .conn
             .query_row(
@@ -53,7 +67,7 @@ impl Database {
                 Ok(())
             }
             _ => {
-                // Create or upgrade schema
+                // Upgrade schema
                 self.create_schema()
             }
         }

@@ -12,7 +12,7 @@ use crate::output::{write_csv_file, write_csv_stdout, write_json_file, write_jso
 use crate::scanner::{ChannelScanner, ScanConfig};
 use crate::storage::{BonDriverSource, Database, ScanSession, ScanStatus};
 
-pub use args::{Cli, Commands, OutputFormat, ScanArgs};
+pub use args::{Cli, Commands, ExportArgs, OutputFormat, ScanArgs};
 
 /// Run the CLI application
 pub fn run() -> ExitCode {
@@ -38,6 +38,7 @@ pub fn run() -> ExitCode {
 fn execute_command(cli: Cli) -> crate::error::Result<()> {
     match cli.command {
         Commands::Scan(args) => execute_scan(args),
+        Commands::Export(args) => execute_export(args),
     }
 }
 
@@ -163,6 +164,65 @@ fn execute_scan(args: ScanArgs) -> crate::error::Result<()> {
     // Return error if interrupted
     if session.status == ScanStatus::Interrupted {
         return Err(BonrecError::Interrupted);
+    }
+
+    Ok(())
+}
+
+/// Execute the export command
+fn execute_export(args: ExportArgs) -> crate::error::Result<()> {
+    use crate::output::{ExportResult, write_export_csv_file, write_export_csv_stdout, write_export_json_file, write_export_json_stdout};
+
+    // Open database
+    let db = Database::open(&args.db)?;
+    log::info!("Database opened: {}", args.db.display());
+
+    // Get the session to export
+    let session = if args.latest {
+        db.get_latest_scan_session()?
+            .ok_or_else(|| BonrecError::invalid_argument("No scan sessions found in database"))?
+    } else if let Some(session_id) = args.session {
+        db.get_scan_session(session_id)?
+            .ok_or_else(|| BonrecError::invalid_argument(format!("Scan session {} not found", session_id)))?
+    } else {
+        // Default to latest if neither specified
+        db.get_latest_scan_session()?
+            .ok_or_else(|| BonrecError::invalid_argument("No scan sessions found in database"))?
+    };
+
+    log::info!("Exporting session #{} ({})", session.id, session.status.as_str());
+
+    // Get channels for the session
+    let channels = db.get_session_channels(session.id)?;
+    log::info!("Found {} channels", channels.len());
+
+    // Create export result
+    let result = ExportResult::new(
+        session.id,
+        session.started_at,
+        session.completed_at,
+        session.status,
+        channels,
+    );
+
+    // Output result based on format and destination
+    match args.format {
+        OutputFormat::Json => {
+            if let Some(output_path) = args.output {
+                write_export_json_file(&result, &output_path)?;
+                log::info!("Output written to: {}", output_path.display());
+            } else {
+                write_export_json_stdout(&result)?;
+            }
+        }
+        OutputFormat::Csv => {
+            if let Some(output_path) = args.output {
+                write_export_csv_file(&result, &output_path)?;
+                log::info!("Output written to: {}", output_path.display());
+            } else {
+                write_export_csv_stdout(&result)?;
+            }
+        }
     }
 
     Ok(())

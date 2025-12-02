@@ -25,6 +25,8 @@ pub struct Cli {
 pub enum Commands {
     /// Scan channels using BonDriver
     Scan(ScanArgs),
+    /// Export scan results from database
+    Export(ExportArgs),
 }
 
 /// Arguments for the scan command
@@ -75,4 +77,28 @@ impl std::fmt::Display for OutputFormat {
             OutputFormat::Csv => write!(f, "csv"),
         }
     }
+}
+
+/// Arguments for the export command
+#[derive(Parser, Debug)]
+pub struct ExportArgs {
+    /// Scan session ID to export
+    #[arg(long, group = "session_select")]
+    pub session: Option<i64>,
+
+    /// Export the latest scan session
+    #[arg(long, group = "session_select")]
+    pub latest: bool,
+
+    /// Output file path (default: stdout)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Output format (json or csv)
+    #[arg(short, long, default_value = "json")]
+    pub format: OutputFormat,
+
+    /// SQLite database path
+    #[arg(long, default_value = "bonrec.db")]
+    pub db: PathBuf,
 }

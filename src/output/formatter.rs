@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::error::Result;
-use crate::output::ScanResult;
+use crate::output::{ExportResult, ScanResult, ScannedChannel};
 
 /// Write scan result to a file as JSON
 pub fn write_json_file(result: &ScanResult, path: &Path) -> Result<()> {
@@ -28,6 +28,24 @@ pub fn write_csv_file(result: &ScanResult, path: &Path) -> Result<()> {
 
 /// Write scan result as CSV to any writer
 fn write_csv<W: Write>(writer: &mut W, result: &ScanResult) -> Result<()> {
+    write_channels_csv(writer, &result.channels)
+}
+
+/// Write export result to stdout as CSV
+pub fn write_export_csv_stdout(result: &ExportResult) -> Result<()> {
+    let mut writer = std::io::stdout();
+    write_channels_csv(&mut writer, &result.channels)
+}
+
+/// Write export result to a file as CSV
+pub fn write_export_csv_file(result: &ExportResult, path: &Path) -> Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    write_channels_csv(&mut writer, &result.channels)
+}
+
+/// Write channels as CSV to any writer
+fn write_channels_csv<W: Write>(writer: &mut W, channels: &[ScannedChannel]) -> Result<()> {
     // Write header
     writeln!(
         writer,
@@ -35,14 +53,14 @@ fn write_csv<W: Write>(writer: &mut W, result: &ScanResult) -> Result<()> {
     )?;
 
     // Write data rows
-    for channel in &result.channels {
+    for channel in channels {
         let available_from = channel.available_from.join(";");
 
         if channel.services.is_empty() {
             // Channel with no services
             writeln!(
                 writer,
-                "{},{},{},{},,,,,{},{}",
+                "{},{},{},{},,,,,{}",
                 escape_csv(&channel.tuning_space),
                 channel.channel_index,
                 channel
@@ -54,7 +72,6 @@ fn write_csv<W: Write>(writer: &mut W, result: &ScanResult) -> Result<()> {
                     .physical_channel
                     .map(|n| n.to_string())
                     .unwrap_or_default(),
-                escape_csv(&available_from),
                 escape_csv(&available_from),
             )?;
         } else {

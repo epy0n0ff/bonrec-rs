@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::scanner::{ScannedChannelInfo, ServiceInfo};
-use crate::storage::ScanStatus;
+use crate::storage::{ExportedChannel, ScanStatus, Service};
 
 /// Scanned service for output
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,5 +118,86 @@ impl ScanResult {
 pub fn write_json_stdout(result: &ScanResult) -> crate::error::Result<()> {
     let json = result.to_json()?;
     println!("{}", json);
+    Ok(())
+}
+
+// ========== Export Result (from database) ==========
+
+impl From<&Service> for ScannedService {
+    fn from(svc: &Service) -> Self {
+        ScannedService {
+            service_id: svc.service_id as u16,
+            network_id: svc.network_id.map(|n| n as u16),
+            transport_stream_id: svc.transport_stream_id.map(|n| n as u16),
+            service_name: svc.service_name.clone(),
+            broadcaster_name: svc.broadcaster_name.clone(),
+        }
+    }
+}
+
+impl From<&ExportedChannel> for ScannedChannel {
+    fn from(ch: &ExportedChannel) -> Self {
+        ScannedChannel {
+            tuning_space: ch.tuning_space.clone(),
+            channel_index: ch.channel_index,
+            channel_name: ch.channel_name.clone(),
+            physical_channel: ch.physical_channel,
+            services: ch.services.iter().map(ScannedService::from).collect(),
+            available_from: ch.available_from.clone(),
+        }
+    }
+}
+
+/// Export result from database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportResult {
+    /// Scan session ID
+    pub scan_session_id: i64,
+    /// Scan start time
+    pub started_at: DateTime<Utc>,
+    /// Scan completion time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+    /// Scan status
+    pub status: ScanStatus,
+    /// Scanned channels
+    pub channels: Vec<ScannedChannel>,
+}
+
+impl ExportResult {
+    /// Create a new export result from database data
+    pub fn new(
+        scan_session_id: i64,
+        started_at: DateTime<Utc>,
+        completed_at: Option<DateTime<Utc>>,
+        status: ScanStatus,
+        channels: Vec<ExportedChannel>,
+    ) -> Self {
+        ExportResult {
+            scan_session_id,
+            started_at,
+            completed_at,
+            status,
+            channels: channels.iter().map(ScannedChannel::from).collect(),
+        }
+    }
+
+    /// Convert to JSON string
+    pub fn to_json(&self) -> crate::error::Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
+}
+
+/// Write export result to stdout as JSON
+pub fn write_export_json_stdout(result: &ExportResult) -> crate::error::Result<()> {
+    let json = result.to_json()?;
+    println!("{}", json);
+    Ok(())
+}
+
+/// Write export result to file as JSON
+pub fn write_export_json_file(result: &ExportResult, path: &std::path::Path) -> crate::error::Result<()> {
+    let json = result.to_json()?;
+    std::fs::write(path, json)?;
     Ok(())
 }

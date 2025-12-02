@@ -184,7 +184,7 @@ impl ChannelScanner {
                 continue;
             }
 
-            log::trace!("Read {} bytes of TS data", all_data.len());
+            log::debug!("Read {} bytes of TS data", all_data.len());
 
             // Parse SI information
             parser.parse(&all_data)?;

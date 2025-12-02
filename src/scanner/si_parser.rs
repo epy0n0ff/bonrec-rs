@@ -80,15 +80,23 @@ impl SiParser {
     pub fn parse(&mut self, ts_data: &[u8]) -> Result<()> {
         // Process each TS packet
         let mut offset = 0;
+        let mut sync_errors = 0;
+        let mut packets_processed = 0;
+        let mut pat_packets = 0;
+        let mut sdt_packets = 0;
+        let mut nit_packets = 0;
 
         while offset + TS_PACKET_SIZE <= ts_data.len() {
             let packet = &ts_data[offset..offset + TS_PACKET_SIZE];
 
             if packet[0] != TS_SYNC_BYTE {
                 // Try to find sync byte
+                sync_errors += 1;
                 offset += 1;
                 continue;
             }
+
+            packets_processed += 1;
 
             // Extract PID
             let pid = ((packet[1] as u16 & 0x1F) << 8) | packet[2] as u16;
@@ -124,16 +132,19 @@ impl SiParser {
 
                 match pid {
                     PAT_PID => {
+                        pat_packets += 1;
                         if !self.pat_parsed {
                             self.parse_pat_section(payload)?;
                         }
                     }
                     SDT_PID => {
+                        sdt_packets += 1;
                         if !self.sdt_parsed {
                             self.parse_sdt_section(payload)?;
                         }
                     }
                     NIT_PID => {
+                        nit_packets += 1;
                         self.parse_nit_section(payload)?;
                     }
                     _ => {}
@@ -142,6 +153,15 @@ impl SiParser {
 
             offset += TS_PACKET_SIZE;
         }
+
+        log::trace!(
+            "Parsed {} packets (sync_errors={}, PAT={}, SDT={}, NIT={})",
+            packets_processed,
+            sync_errors,
+            pat_packets,
+            sdt_packets,
+            nit_packets
+        );
 
         Ok(())
     }

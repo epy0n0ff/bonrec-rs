@@ -18,12 +18,13 @@ pub use args::{Cli, Commands, ExportArgs, OutputFormat, ScanArgs};
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
 
-    // Set log level based on verbose flag
+    // Set log level based on verbose flag and initialize logger
     if cli.verbose {
         std::env::set_var("RUST_LOG", "debug");
     } else {
         std::env::set_var("RUST_LOG", "info");
     }
+    env_logger::init();
 
     match execute_command(cli) {
         Ok(()) => ExitCode::SUCCESS,

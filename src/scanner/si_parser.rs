@@ -66,8 +66,8 @@ pub struct SiParser {
     services: Vec<ServiceInfo>,
     /// Whether PAT has been parsed
     pat_parsed: bool,
-    /// Whether SDT has been parsed
-    sdt_parsed: bool,
+    /// SDT section tracking: (last_section_number, set of received sections)
+    sdt_sections: Option<(u8, std::collections::HashSet<u8>)>,
 }
 
 impl SiParser {
@@ -212,9 +212,8 @@ impl SiParser {
                     }
                     SDT_PID => {
                         sdt_packets += 1;
-                        if !self.sdt_parsed {
-                            self.parse_sdt_section(payload)?;
-                        }
+                        // Always try to parse SDT - we need all sections
+                        self.parse_sdt_section(payload)?;
                     }
                     NIT_PID => {
                         nit_packets += 1;
@@ -319,11 +318,23 @@ impl SiParser {
             return Ok(());
         }
 
+        // Get section_number and last_section_number
+        let section_number = section[6];
+        let last_section_number = section[7];
+
+        // Check if we've already processed this section
+        if let Some((_, ref received)) = self.sdt_sections {
+            if received.contains(&section_number) {
+                return Ok(());
+            }
+        }
+
         // Parse service loop
         let loop_start = 11;
         let loop_end = 3 + section_length - 4; // Exclude CRC
 
         let mut pos = loop_start;
+        let mut services_in_section = 0;
         while pos + 5 <= loop_end && pos + 5 <= section.len() {
             let service_id = ((section[pos] as u16) << 8) | section[pos + 1] as u16;
             let descriptors_loop_length =
@@ -342,6 +353,7 @@ impl SiParser {
                     let desc_data = &section[pos + 2..pos + 2 + descriptor_length];
                     if let Some((provider, service)) = self.parse_service_descriptor(desc_data) {
                         self.sdt_services.insert(service_id, (service, provider));
+                        services_in_section += 1;
                     }
                 }
 
@@ -351,10 +363,42 @@ impl SiParser {
             pos = desc_end;
         }
 
-        self.sdt_parsed = true;
-        log::debug!("SDT parsed: {} services", self.sdt_services.len());
+        // Track this section
+        match &mut self.sdt_sections {
+            Some((_, ref mut received)) => {
+                received.insert(section_number);
+            }
+            None => {
+                let mut received = std::collections::HashSet::new();
+                received.insert(section_number);
+                self.sdt_sections = Some((last_section_number, received));
+            }
+        }
+
+        log::debug!(
+            "SDT section {}/{} parsed: {} services in section, {} total",
+            section_number,
+            last_section_number,
+            services_in_section,
+            self.sdt_services.len()
+        );
 
         Ok(())
+    }
+
+    /// Check if all SDT sections have been received
+    fn sdt_complete(&self) -> bool {
+        if let Some((last_section, ref received)) = self.sdt_sections {
+            // Check if we have all sections from 0 to last_section_number
+            for i in 0..=last_section {
+                if !received.contains(&i) {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     /// Parse NIT (Network Information Table) section
@@ -449,9 +493,27 @@ impl SiParser {
         self.pat_parsed && !self.pat_programs.is_empty()
     }
 
-    /// Check if service names have been collected
+    /// Check if service names have been collected for all services
     pub fn has_service_names(&self) -> bool {
-        self.sdt_parsed && !self.sdt_services.is_empty()
+        // Need to have received at least one SDT section
+        if self.sdt_sections.is_none() {
+            return false;
+        }
+
+        // Check if we have service names for all services in PAT
+        // (Some data services may not have names, so we use a threshold)
+        if self.pat_programs.is_empty() {
+            return false;
+        }
+
+        let services_with_names = self.pat_programs.keys()
+            .filter(|&id| self.sdt_services.contains_key(id))
+            .count();
+
+        // Consider complete if we have names for at least 50% of services
+        // or if all SDT sections have been received
+        let coverage = services_with_names as f64 / self.pat_programs.len() as f64;
+        coverage >= 0.5 || self.sdt_complete()
     }
 
     /// Reset parser state
@@ -462,7 +524,7 @@ impl SiParser {
         self.network_id = None;
         self.services.clear();
         self.pat_parsed = false;
-        self.sdt_parsed = false;
+        self.sdt_sections = None;
     }
 }
 

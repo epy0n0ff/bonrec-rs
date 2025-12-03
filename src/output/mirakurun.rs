@@ -1,0 +1,173 @@
+//! Mirakurun channels.yml output formatting
+
+use serde::Serialize;
+use std::io::Write;
+
+use crate::error::Result;
+use crate::scanner::ScannedChannelInfo;
+use crate::storage::ExportedChannel;
+
+/// Mirakurun channel entry
+#[derive(Debug, Clone, Serialize)]
+pub struct MirakurunChannel {
+    /// Service/Channel name
+    pub name: String,
+    /// Channel type: GR, BS, CS
+    #[serde(rename = "type")]
+    pub channel_type: String,
+    /// Physical channel number (as string)
+    pub channel: String,
+    /// Service ID (optional)
+    #[serde(rename = "serviceId", skip_serializing_if = "Option::is_none")]
+    pub service_id: Option<u16>,
+}
+
+/// Detect channel type from tuning space name
+fn detect_channel_type(tuning_space: &str) -> &'static str {
+    let space_lower = tuning_space.to_lowercase();
+    if space_lower.contains("bs") {
+        "BS"
+    } else if space_lower.contains("cs") {
+        "CS"
+    } else {
+        // Default to GR (terrestrial) for 地デジ, UHF, VHF, etc.
+        "GR"
+    }
+}
+
+/// Convert scanned channel info to Mirakurun channel entries
+pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunChannel> {
+    let mut result = Vec::new();
+
+    for channel in channels {
+        let channel_type = detect_channel_type(&channel.tuning_space);
+        let physical_channel = channel
+            .physical_channel
+            .map(|c| c.to_string())
+            .or_else(|| channel.channel_name.clone())
+            .unwrap_or_else(|| channel.channel_index.to_string());
+
+        // Create an entry for each service
+        for service in &channel.services {
+            let name = service
+                .service_name
+                .clone()
+                .or_else(|| channel.channel_name.clone())
+                .unwrap_or_else(|| format!("Service {}", service.service_id));
+
+            result.push(MirakurunChannel {
+                name,
+                channel_type: channel_type.to_string(),
+                channel: physical_channel.clone(),
+                service_id: Some(service.service_id),
+            });
+        }
+    }
+
+    result
+}
+
+/// Convert exported channels to Mirakurun channel entries
+pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<MirakurunChannel> {
+    let mut result = Vec::new();
+
+    for channel in channels {
+        let channel_type = detect_channel_type(&channel.tuning_space);
+        let physical_channel = channel
+            .physical_channel
+            .map(|c| c.to_string())
+            .or_else(|| channel.channel_name.clone())
+            .unwrap_or_else(|| channel.channel_index.to_string());
+
+        // Create an entry for each service
+        for service in &channel.services {
+            let name = service
+                .service_name
+                .clone()
+                .or_else(|| channel.channel_name.clone())
+                .unwrap_or_else(|| format!("Service {}", service.service_id));
+
+            result.push(MirakurunChannel {
+                name,
+                channel_type: channel_type.to_string(),
+                channel: physical_channel.clone(),
+                service_id: Some(service.service_id as u16),
+            });
+        }
+    }
+
+    result
+}
+
+/// Generate YAML string for Mirakurun channels
+pub fn to_yaml(channels: &[MirakurunChannel]) -> Result<String> {
+    // Use serde_yaml-like manual formatting for clean output
+    let mut output = String::new();
+
+    for channel in channels {
+        output.push_str(&format!("- name: {}\n", escape_yaml_string(&channel.name)));
+        output.push_str(&format!("  type: {}\n", channel.channel_type));
+        output.push_str(&format!("  channel: '{}'\n", channel.channel));
+        if let Some(service_id) = channel.service_id {
+            output.push_str(&format!("  serviceId: {}\n", service_id));
+        }
+        output.push('\n');
+    }
+
+    Ok(output)
+}
+
+/// Escape special characters in YAML string values
+fn escape_yaml_string(s: &str) -> String {
+    // If the string contains special characters, quote it
+    if s.contains(':')
+        || s.contains('#')
+        || s.contains('\'')
+        || s.contains('"')
+        || s.contains('\n')
+        || s.starts_with(' ')
+        || s.ends_with(' ')
+    {
+        // Use double quotes and escape internal double quotes
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Write Mirakurun channels to stdout
+pub fn write_mirakurun_stdout(channels: &[ScannedChannelInfo]) -> Result<()> {
+    let mirakurun_channels = to_mirakurun_channels(channels);
+    let yaml = to_yaml(&mirakurun_channels)?;
+    print!("{}", yaml);
+    Ok(())
+}
+
+/// Write Mirakurun channels to file
+pub fn write_mirakurun_file(channels: &[ScannedChannelInfo], path: &std::path::Path) -> Result<()> {
+    let mirakurun_channels = to_mirakurun_channels(channels);
+    let yaml = to_yaml(&mirakurun_channels)?;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(yaml.as_bytes())?;
+    Ok(())
+}
+
+/// Write exported Mirakurun channels to stdout
+pub fn write_export_mirakurun_stdout(channels: &[ExportedChannel]) -> Result<()> {
+    let mirakurun_channels = exported_to_mirakurun_channels(channels);
+    let yaml = to_yaml(&mirakurun_channels)?;
+    print!("{}", yaml);
+    Ok(())
+}
+
+/// Write exported Mirakurun channels to file
+pub fn write_export_mirakurun_file(
+    channels: &[ExportedChannel],
+    path: &std::path::Path,
+) -> Result<()> {
+    let mirakurun_channels = exported_to_mirakurun_channels(channels);
+    let yaml = to_yaml(&mirakurun_channels)?;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(yaml.as_bytes())?;
+    Ok(())
+}

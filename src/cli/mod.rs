@@ -8,7 +8,10 @@ use clap::Parser;
 
 use crate::bondriver::Tuner;
 use crate::error::BonrecError;
-use crate::output::{write_csv_file, write_csv_stdout, write_json_file, write_json_stdout, ScanResult};
+use crate::output::{
+    write_csv_file, write_csv_stdout, write_json_file, write_json_stdout,
+    write_mirakurun_file, write_mirakurun_stdout, ScanResult,
+};
 use crate::scanner::{ChannelScanner, ScanConfig};
 use crate::storage::{BonDriverSource, Database, ScanSession, ScanStatus};
 
@@ -131,35 +134,44 @@ fn execute_scan(args: ScanArgs) -> crate::error::Result<()> {
     let channels = scanner.get_merged_channels();
     log::info!("Total unique channels: {}", channels.len());
 
-    // Create output result
-    let result = ScanResult::new(
-        session.id,
-        session.started_at,
-        session.completed_at,
-        session.status,
-        channels,
-    );
-
     // Output result based on format and destination
     match args.format {
         OutputFormat::Json => {
+            let result = ScanResult::new(
+                session.id,
+                session.started_at,
+                session.completed_at,
+                session.status,
+                channels,
+            );
             if let Some(output_path) = args.output {
-                // Write to file
                 write_json_file(&result, &output_path)?;
                 log::info!("Output written to: {}", output_path.display());
             } else {
-                // Write to stdout
                 write_json_stdout(&result)?;
             }
         }
         OutputFormat::Csv => {
+            let result = ScanResult::new(
+                session.id,
+                session.started_at,
+                session.completed_at,
+                session.status,
+                channels,
+            );
             if let Some(output_path) = args.output {
-                // Write to file
                 write_csv_file(&result, &output_path)?;
                 log::info!("Output written to: {}", output_path.display());
             } else {
-                // Write to stdout
                 write_csv_stdout(&result)?;
+            }
+        }
+        OutputFormat::Mirakurun => {
+            if let Some(output_path) = args.output {
+                write_mirakurun_file(&channels, &output_path)?;
+                log::info!("Output written to: {}", output_path.display());
+            } else {
+                write_mirakurun_stdout(&channels)?;
             }
         }
     }
@@ -174,7 +186,11 @@ fn execute_scan(args: ScanArgs) -> crate::error::Result<()> {
 
 /// Execute the export command
 fn execute_export(args: ExportArgs) -> crate::error::Result<()> {
-    use crate::output::{ExportResult, write_export_csv_file, write_export_csv_stdout, write_export_json_file, write_export_json_stdout};
+    use crate::output::{
+        write_export_csv_file, write_export_csv_stdout, write_export_json_file,
+        write_export_json_stdout, write_export_mirakurun_file, write_export_mirakurun_stdout,
+        ExportResult,
+    };
 
     // Open database
     let db = Database::open(&args.db)?;
@@ -199,18 +215,16 @@ fn execute_export(args: ExportArgs) -> crate::error::Result<()> {
     let channels = db.get_session_channels(session.id)?;
     log::info!("Found {} channels", channels.len());
 
-    // Create export result
-    let result = ExportResult::new(
-        session.id,
-        session.started_at,
-        session.completed_at,
-        session.status,
-        channels,
-    );
-
     // Output result based on format and destination
     match args.format {
         OutputFormat::Json => {
+            let result = ExportResult::new(
+                session.id,
+                session.started_at,
+                session.completed_at,
+                session.status,
+                channels,
+            );
             if let Some(output_path) = args.output {
                 write_export_json_file(&result, &output_path)?;
                 log::info!("Output written to: {}", output_path.display());
@@ -219,11 +233,26 @@ fn execute_export(args: ExportArgs) -> crate::error::Result<()> {
             }
         }
         OutputFormat::Csv => {
+            let result = ExportResult::new(
+                session.id,
+                session.started_at,
+                session.completed_at,
+                session.status,
+                channels,
+            );
             if let Some(output_path) = args.output {
                 write_export_csv_file(&result, &output_path)?;
                 log::info!("Output written to: {}", output_path.display());
             } else {
                 write_export_csv_stdout(&result)?;
+            }
+        }
+        OutputFormat::Mirakurun => {
+            if let Some(output_path) = args.output {
+                write_export_mirakurun_file(&channels, &output_path)?;
+                log::info!("Output written to: {}", output_path.display());
+            } else {
+                write_export_mirakurun_stdout(&channels)?;
             }
         }
     }

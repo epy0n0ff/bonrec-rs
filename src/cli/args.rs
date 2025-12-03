@@ -72,6 +72,8 @@ pub enum OutputFormat {
     Json,
     /// CSV format
     Csv,
+    /// Mirakurun channels.yml format
+    Mirakurun,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -79,6 +81,7 @@ impl std::fmt::Display for OutputFormat {
         match self {
             OutputFormat::Json => write!(f, "json"),
             OutputFormat::Csv => write!(f, "csv"),
+            OutputFormat::Mirakurun => write!(f, "mirakurun"),
         }
     }
 }

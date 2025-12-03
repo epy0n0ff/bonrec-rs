@@ -466,46 +466,315 @@ impl SiParser {
     }
 }
 
-/// Decode ARIB STD-B24 character string
+/// ARIB STD-B24 character decoder
 ///
-/// This is a simplified decoder that handles common cases.
-/// For full ARIB support, a dedicated library would be needed.
+/// Decodes Japanese digital TV character strings according to ARIB STD-B24.
+/// Handles JIS X 0208 Kanji, Hiragana, Katakana, and alphanumeric characters.
+pub struct AribDecoder {
+    /// Current GL (left) character set: 0=G0, 1=G1, 2=G2, 3=G3
+    gl: u8,
+    /// Current GR (right) character set
+    gr: u8,
+    /// Single shift mode: None, Some(2)=SS2, Some(3)=SS3
+    single_shift: Option<u8>,
+    /// G0-G3 character set designations
+    /// 0=Kanji, 1=Alphanumeric, 2=Hiragana, 3=Katakana, 4=JIS_X_0201_Katakana
+    g_sets: [u8; 4],
+}
+
+impl Default for AribDecoder {
+    fn default() -> Self {
+        // Default designation for Japanese broadcasting
+        AribDecoder {
+            gl: 0,  // GL = G0
+            gr: 2,  // GR = G2
+            single_shift: None,
+            g_sets: [
+                0,  // G0 = Kanji (JIS X 0208)
+                1,  // G1 = Alphanumeric
+                2,  // G2 = Hiragana
+                3,  // G3 = Katakana
+            ],
+        }
+    }
+}
+
+impl AribDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Decode ARIB STD-B24 string
+    pub fn decode(&mut self, data: &[u8]) -> String {
+        let mut result = String::new();
+        let mut i = 0;
+
+        while i < data.len() {
+            let b = data[i];
+
+            // Handle control codes
+            if b < 0x20 {
+                match b {
+                    0x0F => self.gl = 0,  // LS0: GL = G0
+                    0x0E => self.gl = 1,  // LS1: GL = G1
+                    0x19 => self.single_shift = Some(2),  // SS2
+                    0x1D => self.single_shift = Some(3),  // SS3
+                    0x1B => {
+                        // ESC sequence
+                        i = self.parse_escape_sequence(data, i);
+                        continue;
+                    }
+                    0x0A | 0x0D => {
+                        // Keep newlines
+                        result.push(b as char);
+                    }
+                    0x20 => {
+                        result.push(' ');
+                    }
+                    _ => {}  // Skip other control codes
+                }
+                i += 1;
+                continue;
+            }
+
+            // Handle space (0x20)
+            if b == 0x20 {
+                result.push(' ');
+                i += 1;
+                continue;
+            }
+
+            // Determine which character set to use
+            let g_set = if let Some(ss) = self.single_shift.take() {
+                self.g_sets[ss as usize]
+            } else if b >= 0x80 {
+                // GR area (0x80-0xFF) - use GR character set
+                self.g_sets[self.gr as usize]
+            } else {
+                // GL area (0x21-0x7E) - use GL character set
+                self.g_sets[self.gl as usize]
+            };
+
+            // Decode based on character set
+            match g_set {
+                0 => {
+                    // Kanji (JIS X 0208) - 2 bytes
+                    if i + 1 < data.len() {
+                        let b1 = (b & 0x7F) as u16;
+                        let b2 = (data[i + 1] & 0x7F) as u16;
+                        if let Some(c) = jis_x_0208_to_unicode(b1, b2) {
+                            result.push(c);
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                1 => {
+                    // Alphanumeric
+                    let c = b & 0x7F;
+                    if (0x21..=0x7E).contains(&c) {
+                        result.push(c as char);
+                    }
+                    i += 1;
+                }
+                2 => {
+                    // Hiragana
+                    let c = b & 0x7F;
+                    if (0x21..=0x7E).contains(&c) {
+                        // Map to Unicode Hiragana block (U+3041 - U+3096)
+                        let unicode = 0x3040 + (c as u32 - 0x20);
+                        if let Some(ch) = char::from_u32(unicode) {
+                            result.push(ch);
+                        }
+                    }
+                    i += 1;
+                }
+                3 => {
+                    // Katakana
+                    let c = b & 0x7F;
+                    if (0x21..=0x7E).contains(&c) {
+                        // Map to Unicode Katakana block (U+30A1 - U+30F6)
+                        let unicode = 0x30A0 + (c as u32 - 0x20);
+                        if let Some(ch) = char::from_u32(unicode) {
+                            result.push(ch);
+                        }
+                    }
+                    i += 1;
+                }
+                4 => {
+                    // JIS X 0201 Katakana (half-width)
+                    let c = b & 0x7F;
+                    if (0x21..=0x5F).contains(&c) {
+                        let unicode = 0xFF60 + (c as u32 - 0x20);
+                        if let Some(ch) = char::from_u32(unicode) {
+                            result.push(ch);
+                        }
+                    }
+                    i += 1;
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Parse escape sequence and update state
+    fn parse_escape_sequence(&mut self, data: &[u8], pos: usize) -> usize {
+        if pos + 1 >= data.len() {
+            return pos + 1;
+        }
+
+        let b1 = data[pos + 1];
+
+        match b1 {
+            0x24 => {
+                // 2-byte character set designation
+                if pos + 2 >= data.len() {
+                    return pos + 2;
+                }
+                let b2 = data[pos + 2];
+                match b2 {
+                    0x28 | 0x29 | 0x2A | 0x2B => {
+                        // G0-G3 designation with intermediate byte
+                        if pos + 3 >= data.len() {
+                            return pos + 3;
+                        }
+                        let g_num = (b2 - 0x28) as usize;
+                        let final_byte = data[pos + 3];
+                        self.g_sets[g_num] = self.final_byte_to_charset(final_byte, true);
+                        return pos + 4;
+                    }
+                    0x42 | 0x40 => {
+                        // Designate JIS X 0208 to G0
+                        self.g_sets[0] = 0;  // Kanji
+                        return pos + 3;
+                    }
+                    _ => {
+                        return pos + 3;
+                    }
+                }
+            }
+            0x28 | 0x29 | 0x2A | 0x2B => {
+                // 1-byte character set designation to G0-G3
+                if pos + 2 >= data.len() {
+                    return pos + 2;
+                }
+                let g_num = (b1 - 0x28) as usize;
+                let final_byte = data[pos + 2];
+                self.g_sets[g_num] = self.final_byte_to_charset(final_byte, false);
+                return pos + 3;
+            }
+            0x6E => {
+                // LS2: GL = G2
+                self.gl = 2;
+                return pos + 2;
+            }
+            0x6F => {
+                // LS3: GL = G3
+                self.gl = 3;
+                return pos + 2;
+            }
+            0x7E => {
+                // LS1R: GR = G1
+                self.gr = 1;
+                return pos + 2;
+            }
+            0x7D => {
+                // LS2R: GR = G2
+                self.gr = 2;
+                return pos + 2;
+            }
+            0x7C => {
+                // LS3R: GR = G3
+                self.gr = 3;
+                return pos + 2;
+            }
+            _ => {
+                return pos + 2;
+            }
+        }
+    }
+
+    /// Convert final byte to character set ID
+    fn final_byte_to_charset(&self, b: u8, is_2byte: bool) -> u8 {
+        if is_2byte {
+            match b {
+                0x42 | 0x40 => 0,  // JIS X 0208 Kanji
+                0x39 | 0x3B => 0,  // JIS X 0213 Kanji
+                _ => 0,
+            }
+        } else {
+            match b {
+                0x42 => 1,  // ASCII / Alphanumeric
+                0x4A => 1,  // JIS X 0201 Roman
+                0x30 => 2,  // Hiragana
+                0x31 => 3,  // Katakana
+                0x32 => 4,  // Mosaic A
+                0x33 => 4,  // Mosaic B
+                0x34 => 4,  // Mosaic C
+                0x35 => 4,  // Mosaic D
+                0x36 => 1,  // Proportional alphanumeric
+                0x37 => 2,  // Proportional hiragana
+                0x38 => 3,  // Proportional katakana
+                0x49 => 4,  // JIS X 0201 Katakana
+                _ => 1,     // Default to alphanumeric
+            }
+        }
+    }
+}
+
+/// Convert JIS X 0208 code to Unicode
+fn jis_x_0208_to_unicode(row: u16, cell: u16) -> Option<char> {
+    // JIS X 0208 is organized in rows (ku) and cells (ten)
+    // Row 1-8: Symbols and special characters
+    // Row 16-47: Level 1 Kanji
+    // Row 48-84: Level 2 Kanji
+
+    if row < 0x21 || row > 0x7E || cell < 0x21 || cell > 0x7E {
+        return None;
+    }
+
+    // Convert to Shift_JIS then decode
+    // JIS to Shift_JIS conversion
+    let jis_row = row - 0x21;
+    let jis_cell = cell - 0x21;
+
+    let sjis_hi = if jis_row < 63 {
+        ((jis_row / 2) + 0x81) as u8
+    } else {
+        ((jis_row / 2) + 0xC1) as u8
+    };
+
+    let sjis_lo = if jis_row % 2 == 0 {
+        if jis_cell < 63 {
+            (jis_cell + 0x40) as u8
+        } else {
+            (jis_cell + 0x41) as u8
+        }
+    } else {
+        (jis_cell + 0x9F) as u8
+    };
+
+    // Decode Shift_JIS
+    let sjis_bytes = [sjis_hi, sjis_lo];
+    let (decoded, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&sjis_bytes);
+    if !had_errors {
+        decoded.chars().next()
+    } else {
+        None
+    }
+}
+
+/// Decode ARIB STD-B24 character string
 pub fn decode_arib_string(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
 
-    // Check for common character set designators
-    // 0x1B is ESC for character set switching
-    // For simplicity, we try to decode as UTF-8 or Shift_JIS
-
-    // Try to find and skip ESC sequences
-    let mut clean_data = Vec::with_capacity(data.len());
-    let mut i = 0;
-
-    while i < data.len() {
-        if data[i] == 0x1B && i + 2 < data.len() {
-            // Skip ESC sequence (typically 3 bytes)
-            i += 3;
-            continue;
-        }
-
-        // Skip control characters except common ones
-        if data[i] < 0x20 && data[i] != 0x0A && data[i] != 0x0D {
-            i += 1;
-            continue;
-        }
-
-        clean_data.push(data[i]);
-        i += 1;
-    }
-
-    // Try Shift_JIS decoding first (common for Japanese broadcasting)
-    let (decoded, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&clean_data);
-    if !had_errors {
-        return decoded.into_owned();
-    }
-
-    // Fallback to UTF-8
-    String::from_utf8_lossy(&clean_data).into_owned()
+    let mut decoder = AribDecoder::new();
+    decoder.decode(data)
 }

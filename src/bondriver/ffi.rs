@@ -29,6 +29,7 @@ pub struct IBonDriver {
 }
 
 /// IBonDriver virtual method table
+/// Note: GetTsStream has two overloads - the Ptr version comes before Copy in some implementations
 #[repr(C)]
 pub struct IBonDriverVtbl {
     // IBonDriver methods
@@ -38,10 +39,11 @@ pub struct IBonDriverVtbl {
     pub get_signal_level: unsafe extern "system" fn(*mut IBonDriver) -> f32,
     pub wait_ts_stream: unsafe extern "system" fn(*mut IBonDriver, DWORD) -> DWORD,
     pub get_ready_count: unsafe extern "system" fn(*mut IBonDriver) -> DWORD,
-    pub get_ts_stream_copy:
-        unsafe extern "system" fn(*mut IBonDriver, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    // Note: Ptr version comes first in PT series BonDriver vtable
     pub get_ts_stream_ptr:
         unsafe extern "system" fn(*mut IBonDriver, *mut *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    pub get_ts_stream_copy:
+        unsafe extern "system" fn(*mut IBonDriver, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
     pub purge_ts_stream: unsafe extern "system" fn(*mut IBonDriver),
     pub release: unsafe extern "system" fn(*mut IBonDriver),
 }
@@ -53,6 +55,7 @@ pub struct IBonDriver2 {
 }
 
 /// IBonDriver2 virtual method table (extends IBonDriverVtbl)
+/// Note: GetTsStream has two overloads - the Ptr version comes before Copy in some implementations
 #[repr(C)]
 pub struct IBonDriver2Vtbl {
     // IBonDriver methods (inherited)
@@ -62,10 +65,11 @@ pub struct IBonDriver2Vtbl {
     pub get_signal_level: unsafe extern "system" fn(*mut IBonDriver2) -> f32,
     pub wait_ts_stream: unsafe extern "system" fn(*mut IBonDriver2, DWORD) -> DWORD,
     pub get_ready_count: unsafe extern "system" fn(*mut IBonDriver2) -> DWORD,
-    pub get_ts_stream_copy:
-        unsafe extern "system" fn(*mut IBonDriver2, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    // Note: Ptr version comes first in PT series BonDriver vtable
     pub get_ts_stream_ptr:
         unsafe extern "system" fn(*mut IBonDriver2, *mut *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    pub get_ts_stream_copy:
+        unsafe extern "system" fn(*mut IBonDriver2, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
     pub purge_ts_stream: unsafe extern "system" fn(*mut IBonDriver2),
     pub release: unsafe extern "system" fn(*mut IBonDriver2),
 
@@ -86,6 +90,7 @@ pub struct IBonDriver3 {
 }
 
 /// IBonDriver3 virtual method table (extends IBonDriver2Vtbl)
+/// Note: GetTsStream has two overloads - the Ptr version comes before Copy in some implementations
 #[repr(C)]
 pub struct IBonDriver3Vtbl {
     // IBonDriver methods (inherited)
@@ -95,10 +100,11 @@ pub struct IBonDriver3Vtbl {
     pub get_signal_level: unsafe extern "system" fn(*mut IBonDriver3) -> f32,
     pub wait_ts_stream: unsafe extern "system" fn(*mut IBonDriver3, DWORD) -> DWORD,
     pub get_ready_count: unsafe extern "system" fn(*mut IBonDriver3) -> DWORD,
-    pub get_ts_stream_copy:
-        unsafe extern "system" fn(*mut IBonDriver3, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    // Note: Ptr version comes first in PT series BonDriver vtable
     pub get_ts_stream_ptr:
         unsafe extern "system" fn(*mut IBonDriver3, *mut *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
+    pub get_ts_stream_copy:
+        unsafe extern "system" fn(*mut IBonDriver3, *mut BYTE, *mut DWORD, *mut DWORD) -> BOOL,
     pub purge_ts_stream: unsafe extern "system" fn(*mut IBonDriver3),
     pub release: unsafe extern "system" fn(*mut IBonDriver3),
 

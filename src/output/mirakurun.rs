@@ -49,11 +49,20 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
 
     for channel in channels {
         let channel_type = detect_channel_type(&channel.tuning_space);
-        let physical_channel = channel
-            .physical_channel
-            .map(|c| c.to_string())
-            .or_else(|| channel.channel_name.clone())
-            .unwrap_or_else(|| channel.channel_index.to_string());
+        // For BS/CS, use channel_name (transponder name like "BS15_0", "ND2")
+        // For GR, use physical channel number
+        let channel_value = if needs_space(channel_type) {
+            channel
+                .channel_name
+                .clone()
+                .unwrap_or_else(|| channel.channel_index.to_string())
+        } else {
+            channel
+                .physical_channel
+                .map(|c| c.to_string())
+                .or_else(|| channel.channel_name.clone())
+                .unwrap_or_else(|| channel.channel_index.to_string())
+        };
 
         // Include space for BS/CS channels
         let space = if needs_space(channel_type) {
@@ -73,7 +82,7 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
             result.push(MirakurunChannel {
                 name,
                 channel_type: channel_type.to_string(),
-                channel: physical_channel.clone(),
+                channel: channel_value.clone(),
                 space,
                 service_id: Some(service.service_id),
             });
@@ -89,11 +98,20 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
 
     for channel in channels {
         let channel_type = detect_channel_type(&channel.tuning_space);
-        let physical_channel = channel
-            .physical_channel
-            .map(|c| c.to_string())
-            .or_else(|| channel.channel_name.clone())
-            .unwrap_or_else(|| channel.channel_index.to_string());
+        // For BS/CS, use channel_name (transponder name like "BS15_0", "ND2")
+        // For GR, use physical channel number
+        let channel_value = if needs_space(channel_type) {
+            channel
+                .channel_name
+                .clone()
+                .unwrap_or_else(|| channel.channel_index.to_string())
+        } else {
+            channel
+                .physical_channel
+                .map(|c| c.to_string())
+                .or_else(|| channel.channel_name.clone())
+                .unwrap_or_else(|| channel.channel_index.to_string())
+        };
 
         // Include space for BS/CS channels
         let space = if needs_space(channel_type) {
@@ -113,7 +131,7 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
             result.push(MirakurunChannel {
                 name,
                 channel_type: channel_type.to_string(),
-                channel: physical_channel.clone(),
+                channel: channel_value.clone(),
                 space,
                 service_id: Some(service.service_id as u16),
             });

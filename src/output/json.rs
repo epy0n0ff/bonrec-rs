@@ -42,6 +42,8 @@ impl From<&ServiceInfo> for ScannedService {
 pub struct ScannedChannel {
     /// Tuning space name
     pub tuning_space: String,
+    /// Tuning space index
+    pub space_index: u32,
     /// Channel index
     pub channel_index: u32,
     /// Channel name
@@ -60,6 +62,7 @@ impl From<&ScannedChannelInfo> for ScannedChannel {
     fn from(info: &ScannedChannelInfo) -> Self {
         ScannedChannel {
             tuning_space: info.tuning_space.clone(),
+            space_index: info.space_index,
             channel_index: info.channel_index,
             channel_name: info.channel_name.clone(),
             physical_channel: info.physical_channel,
@@ -139,6 +142,7 @@ impl From<&ExportedChannel> for ScannedChannel {
     fn from(ch: &ExportedChannel) -> Self {
         ScannedChannel {
             tuning_space: ch.tuning_space.clone(),
+            space_index: ch.space_index,
             channel_index: ch.channel_index,
             channel_name: ch.channel_name.clone(),
             physical_channel: ch.physical_channel,

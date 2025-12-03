@@ -446,6 +446,7 @@ impl Database {
             SELECT
                 c.id,
                 ts.space_name,
+                ts.space_index,
                 c.channel_index,
                 c.channel_name,
                 c.physical_channel
@@ -457,7 +458,7 @@ impl Database {
             "#,
         )?;
 
-        let channels: Vec<(i64, String, u32, Option<String>, Option<u32>)> = stmt
+        let channels: Vec<(i64, String, u32, u32, Option<String>, Option<u32>)> = stmt
             .query_map(params![session_id], |row| {
                 Ok((
                     row.get(0)?,
@@ -465,12 +466,13 @@ impl Database {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         let mut result = Vec::new();
-        for (channel_id, space_name, channel_index, channel_name, physical_channel) in channels {
+        for (channel_id, space_name, space_index, channel_index, channel_name, physical_channel) in channels {
             // Get services for this channel
             let services = self.get_services(channel_id)?;
 
@@ -479,6 +481,7 @@ impl Database {
 
             result.push(ExportedChannel {
                 tuning_space: space_name,
+                space_index,
                 channel_index,
                 channel_name,
                 physical_channel,
@@ -495,6 +498,7 @@ impl Database {
 #[derive(Debug, Clone)]
 pub struct ExportedChannel {
     pub tuning_space: String,
+    pub space_index: u32,
     pub channel_index: u32,
     pub channel_name: Option<String>,
     pub physical_channel: Option<u32>,

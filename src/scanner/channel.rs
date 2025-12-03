@@ -44,6 +44,8 @@ impl Default for ScanConfig {
 pub struct ScannedChannelInfo {
     /// Tuning space name
     pub tuning_space: String,
+    /// Tuning space index
+    pub space_index: u32,
     /// Channel index
     pub channel_index: u32,
     /// Channel name from BonDriver
@@ -273,6 +275,7 @@ impl ChannelScanner {
                     let signal_level = tuner.get_signal_level();
                     let info = ScannedChannelInfo {
                         tuning_space: space_name.to_string(),
+                        space_index,
                         channel_index,
                         channel_name: Some(channel_name),
                         physical_channel: Some(channel_index),

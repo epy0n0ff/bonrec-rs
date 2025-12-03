@@ -17,6 +17,9 @@ pub struct MirakurunChannel {
     pub channel_type: String,
     /// Physical channel number (as string)
     pub channel: String,
+    /// Tuning space index (for BS/CS with BonDriver)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space: Option<u32>,
     /// Service ID (optional)
     #[serde(rename = "serviceId", skip_serializing_if = "Option::is_none")]
     pub service_id: Option<u16>,
@@ -35,6 +38,11 @@ fn detect_channel_type(tuning_space: &str) -> &'static str {
     }
 }
 
+/// Check if channel type needs space field
+fn needs_space(channel_type: &str) -> bool {
+    channel_type == "BS" || channel_type == "CS"
+}
+
 /// Convert scanned channel info to Mirakurun channel entries
 pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunChannel> {
     let mut result = Vec::new();
@@ -46,6 +54,13 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
             .map(|c| c.to_string())
             .or_else(|| channel.channel_name.clone())
             .unwrap_or_else(|| channel.channel_index.to_string());
+
+        // Include space for BS/CS channels
+        let space = if needs_space(channel_type) {
+            Some(channel.space_index)
+        } else {
+            None
+        };
 
         // Create an entry for each service
         for service in &channel.services {
@@ -59,6 +74,7 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
                 name,
                 channel_type: channel_type.to_string(),
                 channel: physical_channel.clone(),
+                space,
                 service_id: Some(service.service_id),
             });
         }
@@ -79,6 +95,13 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
             .or_else(|| channel.channel_name.clone())
             .unwrap_or_else(|| channel.channel_index.to_string());
 
+        // Include space for BS/CS channels
+        let space = if needs_space(channel_type) {
+            Some(channel.space_index)
+        } else {
+            None
+        };
+
         // Create an entry for each service
         for service in &channel.services {
             let name = service
@@ -91,6 +114,7 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
                 name,
                 channel_type: channel_type.to_string(),
                 channel: physical_channel.clone(),
+                space,
                 service_id: Some(service.service_id as u16),
             });
         }
@@ -108,6 +132,9 @@ pub fn to_yaml(channels: &[MirakurunChannel]) -> Result<String> {
         output.push_str(&format!("- name: {}\n", escape_yaml_string(&channel.name)));
         output.push_str(&format!("  type: {}\n", channel.channel_type));
         output.push_str(&format!("  channel: '{}'\n", channel.channel));
+        if let Some(space) = channel.space {
+            output.push_str(&format!("  space: {}\n", space));
+        }
         if let Some(service_id) = channel.service_id {
             output.push_str(&format!("  serviceId: {}\n", service_id));
         }

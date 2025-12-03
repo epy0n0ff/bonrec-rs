@@ -31,6 +31,9 @@ pub const TABLE_ID_PMT: u8 = 0x02;
 /// Table ID for SDT (actual)
 pub const TABLE_ID_SDT_ACTUAL: u8 = 0x42;
 
+/// Table ID for SDT (other)
+pub const TABLE_ID_SDT_OTHER: u8 = 0x46;
+
 /// Table ID for NIT (actual)
 pub const TABLE_ID_NIT_ACTUAL: u8 = 0x40;
 
@@ -308,7 +311,10 @@ impl SiParser {
         }
 
         let section = &data[section_start..];
-        if section.is_empty() || section[0] != TABLE_ID_SDT_ACTUAL {
+        // Accept both SDT-actual (0x42) and SDT-other (0x46)
+        // CS channels often use SDT-other
+        let table_id = section[0];
+        if section.is_empty() || (table_id != TABLE_ID_SDT_ACTUAL && table_id != TABLE_ID_SDT_OTHER) {
             return Ok(());
         }
 
@@ -376,7 +382,8 @@ impl SiParser {
         }
 
         log::debug!(
-            "SDT section {}/{} parsed: {} services in section, {} total",
+            "SDT (table_id=0x{:02X}) section {}/{} parsed: {} services in section, {} total",
+            table_id,
             section_number,
             last_section_number,
             services_in_section,

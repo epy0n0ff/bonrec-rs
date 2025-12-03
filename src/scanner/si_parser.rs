@@ -641,24 +641,22 @@ impl AribDecoder {
                     i += 1;
                 }
                 2 => {
-                    // Hiragana
+                    // Hiragana - use JIS X 0208 Row 4
                     let c = b & 0x7F;
                     if (0x21..=0x7E).contains(&c) {
-                        // Map to Unicode Hiragana block (U+3041 - U+3096)
-                        let unicode = 0x3040 + (c as u32 - 0x20);
-                        if let Some(ch) = char::from_u32(unicode) {
+                        // JIS X 0208 Row 4 (0x24) for Hiragana
+                        if let Some(ch) = jis_x_0208_to_unicode(0x24, c as u16) {
                             result.push(ch);
                         }
                     }
                     i += 1;
                 }
                 3 => {
-                    // Katakana
+                    // Katakana - use JIS X 0208 Row 5
                     let c = b & 0x7F;
                     if (0x21..=0x7E).contains(&c) {
-                        // Map to Unicode Katakana block (U+30A1 - U+30F6)
-                        let unicode = 0x30A0 + (c as u32 - 0x20);
-                        if let Some(ch) = char::from_u32(unicode) {
+                        // JIS X 0208 Row 5 (0x25) for Katakana
+                        if let Some(ch) = jis_x_0208_to_unicode(0x25, c as u16) {
                             result.push(ch);
                         }
                     }

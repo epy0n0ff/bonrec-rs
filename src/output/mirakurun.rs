@@ -43,6 +43,39 @@ fn needs_space(channel_type: &str) -> bool {
     channel_type == "BS" || channel_type == "CS"
 }
 
+/// Get sort order for channel type
+fn channel_type_order(channel_type: &str) -> u8 {
+    match channel_type {
+        "GR" => 0,
+        "BS" => 1,
+        "CS" => 2,
+        _ => 3,
+    }
+}
+
+/// Sort Mirakurun channels by type, channel number, and service ID
+fn sort_channels(channels: &mut [MirakurunChannel]) {
+    channels.sort_by(|a, b| {
+        // First, sort by channel type (GR < BS < CS)
+        let type_cmp = channel_type_order(&a.channel_type)
+            .cmp(&channel_type_order(&b.channel_type));
+        if type_cmp != std::cmp::Ordering::Equal {
+            return type_cmp;
+        }
+
+        // Then, sort by channel number (numeric)
+        let a_ch: u32 = a.channel.parse().unwrap_or(u32::MAX);
+        let b_ch: u32 = b.channel.parse().unwrap_or(u32::MAX);
+        let ch_cmp = a_ch.cmp(&b_ch);
+        if ch_cmp != std::cmp::Ordering::Equal {
+            return ch_cmp;
+        }
+
+        // Finally, sort by service ID
+        a.service_id.cmp(&b.service_id)
+    });
+}
+
 /// Convert scanned channel info to Mirakurun channel entries
 pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunChannel> {
     let mut result = Vec::new();
@@ -86,6 +119,7 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
         }
     }
 
+    sort_channels(&mut result);
     result
 }
 
@@ -132,6 +166,7 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
         }
     }
 
+    sort_channels(&mut result);
     result
 }
 

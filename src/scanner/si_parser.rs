@@ -54,6 +54,29 @@ pub struct ServiceInfo {
     pub transport_stream_id: Option<u16>,
 }
 
+/// Section buffer for reassembling multi-packet sections
+#[derive(Debug, Default, Clone)]
+struct SectionBuffer {
+    /// Accumulated section data
+    data: Vec<u8>,
+    /// Expected section length (from header)
+    expected_length: usize,
+    /// Continuity counter for packet sequence
+    continuity_counter: Option<u8>,
+}
+
+impl SectionBuffer {
+    fn reset(&mut self) {
+        self.data.clear();
+        self.expected_length = 0;
+        self.continuity_counter = None;
+    }
+
+    fn is_complete(&self) -> bool {
+        self.expected_length > 0 && self.data.len() >= self.expected_length + 3
+    }
+}
+
 /// SI parser for extracting service information from TS stream
 #[derive(Debug, Default)]
 pub struct SiParser {
@@ -71,6 +94,8 @@ pub struct SiParser {
     pat_parsed: bool,
     /// SDT section tracking: (last_section_number, set of received sections)
     sdt_sections: Option<(u8, std::collections::HashSet<u8>)>,
+    /// SDT section buffer for multi-packet reassembly
+    sdt_buffer: SectionBuffer,
 }
 
 impl SiParser {
@@ -154,6 +179,7 @@ impl SiParser {
         let mut pat_packets = 0;
         let mut sdt_packets = 0;
         let mut nit_packets = 0;
+        let mut sdt_pid_total = 0;  // Total packets on SDT PID (including non-start)
 
         // Use standard 188 byte packet for actual TS data parsing
         // (packet_size includes any prefix bytes like timestamp)
@@ -202,7 +228,77 @@ impl SiParser {
                 continue;
             }
 
-            // Process payload based on PID
+            // Get continuity counter for section reassembly
+            let continuity_counter = packet[3] & 0x0F;
+
+            // Count all SDT PID packets for debugging
+            if pid == SDT_PID {
+                sdt_pid_total += 1;
+            }
+
+            // Handle SDT - support both single-packet and multi-packet sections
+            if pid == SDT_PID && payload_offset < ts_packet_len {
+                let payload = &packet[payload_offset..];
+
+                if payload_unit_start {
+                    sdt_packets += 1;
+
+                    // Try to parse directly first (works for single-packet sections like BS)
+                    // This is the original simple approach that worked before
+                    self.parse_sdt_section(payload)?;
+
+                    // Also set up buffer for multi-packet sections (like CS)
+                    self.sdt_buffer.reset();
+                    let pointer_field = payload[0] as usize;
+                    let section_start = 1 + pointer_field;
+
+                    if section_start < payload.len() {
+                        let section_data = &payload[section_start..];
+                        if section_data.len() >= 3 {
+                            let section_length = ((section_data[1] as usize & 0x0F) << 8) | section_data[2] as usize;
+                            let total_section_size = section_length + 3;
+
+                            // Only buffer if section spans multiple packets
+                            if section_data.len() < total_section_size {
+                                self.sdt_buffer.expected_length = section_length;
+                                self.sdt_buffer.data.extend_from_slice(section_data);
+                                self.sdt_buffer.continuity_counter = Some(continuity_counter);
+                                log::trace!(
+                                    "SDT section spans packets: need {} bytes, got {} bytes",
+                                    total_section_size,
+                                    section_data.len()
+                                );
+                            }
+                        }
+                    }
+                } else if !self.sdt_buffer.data.is_empty() {
+                    // Continuation packet - append to buffer
+                    if let Some(last_cc) = self.sdt_buffer.continuity_counter {
+                        let expected_cc = (last_cc + 1) & 0x0F;
+                        if continuity_counter != expected_cc {
+                            log::trace!("SDT continuity error: expected {}, got {}", expected_cc, continuity_counter);
+                            self.sdt_buffer.reset();
+                        } else {
+                            self.sdt_buffer.data.extend_from_slice(payload);
+                            self.sdt_buffer.continuity_counter = Some(continuity_counter);
+
+                            // Try to parse if we have a complete section
+                            if self.sdt_buffer.is_complete() {
+                                log::trace!(
+                                    "SDT section complete: {} bytes",
+                                    self.sdt_buffer.data.len()
+                                );
+                                let mut section_with_pointer = vec![0u8];
+                                section_with_pointer.extend_from_slice(&self.sdt_buffer.data);
+                                self.parse_sdt_section(&section_with_pointer)?;
+                                self.sdt_buffer.reset();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Process payload based on PID (non-SDT)
             if payload_unit_start && payload_offset < ts_packet_len {
                 let payload = &packet[payload_offset..];
 
@@ -212,11 +308,6 @@ impl SiParser {
                         if !self.pat_parsed {
                             self.parse_pat_section(payload)?;
                         }
-                    }
-                    SDT_PID => {
-                        sdt_packets += 1;
-                        // Always try to parse SDT - we need all sections
-                        self.parse_sdt_section(payload)?;
                     }
                     NIT_PID => {
                         nit_packets += 1;
@@ -230,11 +321,12 @@ impl SiParser {
         }
 
         log::debug!(
-            "Parsed {} packets (sync_errors={}, PAT={}, SDT={}, NIT={})",
+            "Parsed {} packets (sync_errors={}, PAT={}, SDT={} [pid_total={}], NIT={})",
             packets_processed,
             sync_errors,
             pat_packets,
             sdt_packets,
+            sdt_pid_total,
             nit_packets
         );
 
@@ -532,6 +624,7 @@ impl SiParser {
         self.services.clear();
         self.pat_parsed = false;
         self.sdt_sections = None;
+        self.sdt_buffer.reset();
     }
 }
 
@@ -659,11 +752,10 @@ impl AribDecoder {
                     i += 1;
                 }
                 3 => {
-                    // Katakana - use JIS X 0208 Row 5
+                    // Katakana - use ARIB Katakana table
                     let c = b & 0x7F;
                     if (0x21..=0x7E).contains(&c) {
-                        // JIS X 0208 Row 5 (0x25) for Katakana
-                        if let Some(ch) = jis_x_0208_to_unicode(0x25, c as u16) {
+                        if let Some(ch) = arib_katakana_to_unicode(c) {
                             result.push(ch);
                         }
                     }
@@ -833,6 +925,111 @@ fn jis_x_0208_to_unicode(row: u16, cell: u16) -> Option<char> {
         decoded.chars().next()
     } else {
         None
+    }
+}
+
+/// Convert ARIB Katakana code to Unicode
+/// ARIB Katakana set (designated by ESC 0x28 0x31) has different mapping than JIS X 0208 row 5
+fn arib_katakana_to_unicode(code: u8) -> Option<char> {
+    // ARIB Katakana: Based on JIS X 0201 Katakana extended to 94 characters
+    // Note: Positions differ from JIS X 0208 row 5 after ロ (0x6D)
+    match code {
+        0x21 => Some('ァ'),
+        0x22 => Some('ア'),
+        0x23 => Some('ィ'),
+        0x24 => Some('イ'),
+        0x25 => Some('ゥ'),
+        0x26 => Some('ウ'),
+        0x27 => Some('ェ'),
+        0x28 => Some('エ'),
+        0x29 => Some('ォ'),
+        0x2A => Some('オ'),
+        0x2B => Some('カ'),
+        0x2C => Some('ガ'),
+        0x2D => Some('キ'),
+        0x2E => Some('ギ'),
+        0x2F => Some('ク'),
+        0x30 => Some('グ'),
+        0x31 => Some('ケ'),
+        0x32 => Some('ゲ'),
+        0x33 => Some('コ'),
+        0x34 => Some('ゴ'),
+        0x35 => Some('サ'),
+        0x36 => Some('ザ'),
+        0x37 => Some('シ'),
+        0x38 => Some('ジ'),
+        0x39 => Some('ス'),
+        0x3A => Some('ズ'),
+        0x3B => Some('セ'),
+        0x3C => Some('ゼ'),
+        0x3D => Some('ソ'),
+        0x3E => Some('ゾ'),
+        0x3F => Some('タ'),
+        0x40 => Some('ダ'),
+        0x41 => Some('チ'),
+        0x42 => Some('ヂ'),
+        0x43 => Some('ッ'),
+        0x44 => Some('ツ'),
+        0x45 => Some('ヅ'),
+        0x46 => Some('テ'),
+        0x47 => Some('デ'),
+        0x48 => Some('ト'),
+        0x49 => Some('ド'),
+        0x4A => Some('ナ'),
+        0x4B => Some('ニ'),
+        0x4C => Some('ヌ'),
+        0x4D => Some('ネ'),
+        0x4E => Some('ノ'),
+        0x4F => Some('ハ'),
+        0x50 => Some('バ'),
+        0x51 => Some('パ'),
+        0x52 => Some('ヒ'),
+        0x53 => Some('ビ'),
+        0x54 => Some('ピ'),
+        0x55 => Some('フ'),
+        0x56 => Some('ブ'),
+        0x57 => Some('プ'),
+        0x58 => Some('ヘ'),
+        0x59 => Some('ベ'),
+        0x5A => Some('ペ'),
+        0x5B => Some('ホ'),
+        0x5C => Some('ボ'),
+        0x5D => Some('ポ'),
+        0x5E => Some('マ'),
+        0x5F => Some('ミ'),
+        0x60 => Some('ム'),
+        0x61 => Some('メ'),
+        0x62 => Some('モ'),
+        0x63 => Some('ャ'),
+        0x64 => Some('ヤ'),
+        0x65 => Some('ュ'),
+        0x66 => Some('ユ'),
+        0x67 => Some('ョ'),
+        0x68 => Some('ヨ'),
+        0x69 => Some('ラ'),
+        0x6A => Some('リ'),
+        0x6B => Some('ル'),
+        0x6C => Some('レ'),
+        0x6D => Some('ロ'),
+        0x6E => Some('ワ'),
+        0x6F => Some('ヲ'),
+        0x70 => Some('ン'),
+        0x71 => Some('゛'),  // Voiced mark
+        0x72 => Some('゜'),  // Semi-voiced mark
+        // Extended characters (ARIB specific)
+        0x73 => Some('ン'),  // Duplicate for compatibility
+        0x74 => Some('ヴ'),
+        0x75 => Some('ヵ'),
+        0x76 => Some('ヶ'),
+        0x77 => Some('ヽ'),  // Katakana iteration mark
+        0x78 => Some('ヾ'),  // Katakana voiced iteration mark
+        0x79 => Some('ー'),  // Prolonged sound mark
+        0x7A => Some('。'),
+        0x7B => Some('「'),
+        0x7C => Some('」'),
+        0x7D => Some('、'),
+        0x7E => Some('・'),
+        _ => None,
     }
 }
 

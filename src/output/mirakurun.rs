@@ -49,13 +49,10 @@ pub fn to_mirakurun_channels(channels: &[ScannedChannelInfo]) -> Vec<MirakurunCh
 
     for channel in channels {
         let channel_type = detect_channel_type(&channel.tuning_space);
-        // For BS/CS, use channel_name (transponder name like "BS15_0", "ND2")
+        // For BS/CS, use channel_index (numeric index for BonDriver tuning)
         // For GR, use physical channel number
         let channel_value = if needs_space(channel_type) {
-            channel
-                .channel_name
-                .clone()
-                .unwrap_or_else(|| channel.channel_index.to_string())
+            channel.channel_index.to_string()
         } else {
             channel
                 .physical_channel
@@ -98,13 +95,10 @@ pub fn exported_to_mirakurun_channels(channels: &[ExportedChannel]) -> Vec<Mirak
 
     for channel in channels {
         let channel_type = detect_channel_type(&channel.tuning_space);
-        // For BS/CS, use channel_name (transponder name like "BS15_0", "ND2")
+        // For BS/CS, use channel_index (numeric index for BonDriver tuning)
         // For GR, use physical channel number
         let channel_value = if needs_space(channel_type) {
-            channel
-                .channel_name
-                .clone()
-                .unwrap_or_else(|| channel.channel_index.to_string())
+            channel.channel_index.to_string()
         } else {
             channel
                 .physical_channel

@@ -421,9 +421,13 @@ impl SiParser {
         let last_section_number = section[7];
 
         // Check if we've already processed this section
-        if let Some((_, ref received)) = self.sdt_sections {
-            if received.contains(&section_number) {
-                return Ok(());
+        // Only track SDT-actual (0x42) for section completion
+        // SDT-other (0x46) provides info for other transport streams
+        if table_id == TABLE_ID_SDT_ACTUAL {
+            if let Some((_, ref received)) = self.sdt_sections {
+                if received.contains(&section_number) {
+                    return Ok(());
+                }
             }
         }
 
@@ -461,15 +465,19 @@ impl SiParser {
             pos = desc_end;
         }
 
-        // Track this section
-        match &mut self.sdt_sections {
-            Some((_, ref mut received)) => {
-                received.insert(section_number);
-            }
-            None => {
-                let mut received = std::collections::HashSet::new();
-                received.insert(section_number);
-                self.sdt_sections = Some((last_section_number, received));
+        // Track this section (only SDT-actual for completion detection)
+        // SDT-other provides service info for other transport streams but
+        // shouldn't affect our section completion tracking
+        if table_id == TABLE_ID_SDT_ACTUAL {
+            match &mut self.sdt_sections {
+                Some((_, ref mut received)) => {
+                    received.insert(section_number);
+                }
+                None => {
+                    let mut received = std::collections::HashSet::new();
+                    received.insert(section_number);
+                    self.sdt_sections = Some((last_section_number, received));
+                }
             }
         }
 

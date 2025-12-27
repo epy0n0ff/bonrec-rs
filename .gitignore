@@ -1,0 +1,60 @@
+# Rust build artifacts
+/target/
+debug/
+release/
+*.rs.bk
+*.rlib
+**/*.rs.bk
+
+# Cargo lock file (uncomment if library)
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+bonrec.db
+
+# Log files
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Test coverage
+*.profraw
+*.profdata
+tarpaulin-report.html
+coverage/
+
+# Documentation build
+/doc/
+
+# Backup files
+*.bak
+*.backup
